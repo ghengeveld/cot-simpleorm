@@ -100,6 +100,13 @@ abstract class SimpleORM
 		}
 	}
 
+	/**
+	 * Returns column names and properties
+	 *
+	 * @param bool $include_locked Return locked columns?
+	 * @param bool $include_hidden Return hidden columns?
+	 * @return array
+	 */
 	public function columns($include_locked = false, $include_hidden = false)
 	{
 		$cols = array();
@@ -133,7 +140,10 @@ abstract class SimpleORM
 	/**
 	 * Retrieve all existing objects from database
 	 *
-	 * @param mixed $pk Primary key
+	 * @param int $limit Maximum number of returned objects
+	 * @param int $offset Offset from where to begin returning objects
+	 * @param string $order Column name to order on
+	 * @param string $way Order way 'ASC' or 'DESC'
 	 * @return array
 	 */
 	public static function findAll($limit = 0, $offset = 0, $order = '', $way = 'ASC')
