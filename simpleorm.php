@@ -101,11 +101,11 @@ abstract class SimpleORM
 	}
 
 	/**
-	 * Returns column names and properties
+	 * Returns object data column definitions
 	 *
 	 * @param bool $include_locked Return locked columns?
 	 * @param bool $include_hidden Return hidden columns?
-	 * @return array
+	 * @return array 
 	 */
 	public function columns($include_locked = false, $include_hidden = false)
 	{
@@ -178,8 +178,26 @@ abstract class SimpleORM
 	 */
 	protected function fetch($conditions = array(), $limit = 0, $offset = 0, $order = '', $way = 'DESC')
 	{
-		$objects = array();
+		global $db_x;
+		$table = $this->tableName();
+		$columns = array();
 		$params = array();
+		$obj = new $this->class_name();
+		$cols = $obj->columns();
+		foreach ($cols as $col => $data)
+		{
+			$columns[] = "$table.$col";
+			if ($data['foreign_key'] && strpos($data['foreign_key'], ':') !== null)
+			{
+				list($table_fk, $col_fk) = explode(':', $data['foreign_key']);
+				$table_fk = $db_x.$table_fk;
+				$columns[] = "$table_fk.$col_fk";
+				$joins[] = "INNER JOIN $table_fk ON $table.$col = $table_fk.$col_fk";
+			}
+		}
+		$columns = implode(', ', $columns);
+		$joins = implode(' ', $joins);
+		
 		if (!is_array($conditions)) $conditions = array($conditions);
 		if (count($conditions) > 0)
 		{
@@ -202,8 +220,10 @@ abstract class SimpleORM
 		}
 		$order = ($order) ? "ORDER BY $order $way" : '';
 		$limit = ($limit) ? "LIMIT $offset, $limit" : '';
+		
+		$objects = array();
 		$res = $this->db->query("
-			SELECT * FROM ".$this->tableName()." $where $order $limit
+			SELECT $columns FROM $table $joins $where $order $limit
 		", $params);
 		while ($row = $res->fetch(PDO::FETCH_ASSOC))
 		{
@@ -334,54 +354,63 @@ abstract class SimpleORM
 	 * Saves object to database
 	 * 
 	 * @param string $action Allow only a specific action, 'update' or 'insert'
-	 * @return string 'updated' or 'added'
+	 * @return string 'update', 'insert' or false on failure
 	 */
 	public function save($action = null)
 	{
 		global $usr;
 		cot_block($usr['auth_write']);
-		if ($this->data[$this->primaryKey()] && static::findByPk($this->data[$this->primaryKey()]))
+		$table = $this->tableName();
+		$pk = $this->primaryKey();
+		if ($this->data[$pk] && static::findByPk($this->data[$pk]))
 		{
 			cot_block($usr['isadmin']);
-			if ($action && $action != 'update')
-				return;
-			if ($this->update(
-					$this->data, $this->primaryKey().' = ?', array($this->data[$this->primaryKey()])
-				) !== FALSE)
-				return 'updated';
+			if (!$action || $action == 'update')
+			{
+				$res = $this->db->update(
+					$table,
+					$this->prepData($this->data, 'update'), 
+					"$pk = ?", 
+					array($this->data[$pk])
+				);
+				if ($res !== FALSE)
+				{
+					return 'update';
+				}
+			}
 		}
 		elseif (!$action || $action == 'insert')
 		{
-			if ($this->insert($this->data))
+			$res = $this->db->insert(
+				$table, $this->prepData($this->data, 'insert')
+			);
+			if ($res)
 			{
-				$this->data[$this->primaryKey()] = $this->db->lastInsertId();
-				return 'added';
+				$this->data[$pk] = $this->db->lastInsertId();
+				return 'insert';
 			}
 		}
+		return false;
 	}
 
 	/**
-	 * Create new object in database
+	 * Wrapper for $this->save('insert')
 	 *
-	 * @param array $data Associative or 2D array containing data for insertion.
-	 * @return int The number of affected records
+	 * @return bool TRUE on successful insert, FALSE otherwise
 	 */
-	protected function insert($data)
+	protected function insert()
 	{
-		return $this->db->insert($this->tableName(), $this->prepData($data, 'insert'));
+		return ($this->save('insert') == 'insert');
 	}
 
 	/**
-	 * Update object in database
+	 * Wrapper for $this->save('update')
 	 *
-	 * @param array $data Associative array containing data for update
-	 * @param string $condition Body of SQL WHERE clause
-	 * @param array $params Array of statement input parameters, see http://www.php.net/manual/en/pdostatement.execute.php
-	 * @return int The number of affected records or FALSE on error
+	 * @return bool TRUE on successful update, FALSE otherwise
 	 */
-	protected function update($data, $condition, $params = array())
+	protected function update()
 	{
-		return $this->db->update($this->tableName(), $this->prepData($data, 'update'), $condition, $params);
+		return ($this->save('update') == 'update');
 	}
 
 	/**
@@ -394,6 +423,48 @@ abstract class SimpleORM
 	public function delete($condition, $params = array())
 	{
 		return $this->db->delete($this->tableName(), $condition, $params);
+	}
+
+	/**
+	 * Imports column data from POST, GET or otherwise and returns them as associative array.
+	 * 
+	 * @param string $source Source of data. 'G' ($_GET), 'P' ($_POST), 'R' ($_REQUEST), 'C' ($_COOKIE) or 'D' (direct)
+	 * @return array
+	 */
+	public static function import($source = 'P')
+	{
+		SimpleORM::checkPHPVersion();
+		$vars = array();
+		$obj = new static();
+		$columns = $obj->columns(true, true);
+		foreach ($columns as $name => $data)
+		{
+			if ($data['on_insert'] && $data['locked']) continue;
+			switch($data['type'])
+			{
+				case 'int':
+				case 'integer':
+				case 'tinyint':
+				case 'smallint':
+				case 'mediumint':
+				case 'bigint':
+					$filter = 'INT';
+					break;
+				case 'float':
+				case 'double':
+				case 'real':
+				case 'decimal':
+				case 'numeric':
+					$filter = 'NUM';
+					break;
+				default:
+					$filter = ($data['alphanumeric']) ? 'ALP' : 'TXT';
+					break;
+			}
+			$maxlen = ($data['length']) ? $data['length'] : 0;
+			$vars[$name] = cot_import($name, $source, $filter, $maxlen);
+		}
+		return $vars;
 	}
 
 	/**
