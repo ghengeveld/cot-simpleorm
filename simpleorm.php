@@ -181,18 +181,19 @@ abstract class SimpleORM
 		global $db_x;
 		$table = $this->tableName();
 		$columns = array();
+		$joins = array();
 		$params = array();
 		$obj = new $this->class_name();
 		$cols = $obj->columns();
 		foreach ($cols as $col => $data)
 		{
-			$columns[] = "$table.$col";
+			$columns[] = "`$table`.`$col`";
 			if ($data['foreign_key'] && strpos($data['foreign_key'], ':') !== null)
 			{
 				list($table_fk, $col_fk) = explode(':', $data['foreign_key']);
 				$table_fk = $db_x.$table_fk;
-				$columns[] = "$table_fk.$col_fk";
-				$joins[] = "INNER JOIN $table_fk ON $table.$col = $table_fk.$col_fk";
+				$columns[] = "`$table_fk`.`$col_fk`";
+				$joins[] = "INNER JOIN `$table_fk` ON `$table`.`$col` = `$table_fk`.`$col_fk`";
 			}
 		}
 		$columns = implode(', ', $columns);
@@ -218,7 +219,7 @@ abstract class SimpleORM
 			}
 			$where = 'WHERE '.implode(' AND ', $where);
 		}
-		$order = ($order) ? "ORDER BY $order $way" : '';
+		$order = ($order) ? "ORDER BY `$order` $way" : '';
 		$limit = ($limit) ? "LIMIT $offset, $limit" : '';
 		
 		$objects = array();
@@ -241,13 +242,14 @@ abstract class SimpleORM
 	 */
 	protected function loadData()
 	{
-		if (!$this->data[$this->primaryKey()]) return false;
+		$pk = $this->primaryKey();
+		if (!$this->data[$pk]) return false;
 		$res = $this->db->query("
 			SELECT *
-			FROM ".$this->tableName()."
-			WHERE ".$this->primaryKey()." = ?
+			FROM `".$this->tableName()."`
+			WHERE `$pk` = ?
 			LIMIT 1
-		", array($this->data[$this->primaryKey()]))->fetch(PDO::FETCH_ASSOC);
+		", array($this->data[$pk]))->fetch(PDO::FETCH_ASSOC);
 
 		if ($res)
 		{
