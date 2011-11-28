@@ -58,18 +58,40 @@ in classes/Project.php:
 The model class extends SimpleORM, which will make Project inherit all of 
 SimpleORM's methods and properties. Since SimpleORM contains all the fancy 
 methods, all we need to do here is configure the properties of Project. There 
-are two properties we have to configure: $table_name and $columns.
+are two properties we have to configure: `$table_name` and `$columns`.
 
 `$table_name` is the name of the database table to store Project objects. A 
 common convention is to use the lowercase, plural of the class name, so 
 'projects' in this case. SimpleORM will automatically prepend Cotonti's `$db_x` 
 to the table name.
 
-$columns is where things get interesting. It is where you configure the database 
-columns for the objects. SimpleORM will automatically validate incoming data 
-based on the rules set in $columns. This includes variable type checking, 
+`$columns` is where things get interesting. It is where you configure the 
+database columns for the objects. SimpleORM will automatically validate incoming 
+data based on the rules set in $columns. This includes variable type checking, 
 foreign key constraints and unique values. It also allows you to 'lock' and/or 
-'hide' a column from the outside world.
+'hide' a column from the outside world. Here's an overview:
+
+#### Column properties
+
+*   type (string): MySQL data type (lowercase), such as 'int', 'varchar', 'text'
+*   length (int/string): Maximum display length of the value, or in case of 
+    float or decimal, a string representing precision and scale.
+*   primary_key (bool): If true, the column will be considered the primary key 
+    and be used as object identifier.
+*   foreign_key (string): Table and column name pair which the column is 
+    directly related to. SimpleORM will enforce the foreign key dependency. 
+    Table and column name must be seperated with a colon. Table name should not 
+    include `$db_x`. Example: 'users:user_id'
+*   index (bool): If true, sets an MySQL INDEX on this column.
+*   unique (bool): If true, sets an MySQL UNIQUE constraint on this column.
+*   auto_increment (bool): If true, sets the MySQL AUTO_INCREMENT flag on this 
+    column.
+*   on_insert (string): Default value for the column in INSERT queries. Accepts 
+    a special value 'NOW()' which will translate to PHP `time()`.
+*   on_update (string): Default value in UPDATE queries. Also accepts 'NOW()'.
+*   locked (bool): Disallows UPDATE queries on this column.
+*   hidden (bool): Makes the column not appear in result objects.
+*   alphanumeric (bool): Enforces values to be alphanumeric.
 
 ### Adding a project
 
