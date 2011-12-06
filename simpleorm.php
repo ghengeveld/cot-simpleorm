@@ -125,6 +125,20 @@ abstract class SimpleORM
 	}
 
 	/**
+	 * Count records matching condition
+	 *
+	 * @param mixed $conditions Numeric array of SQL WHERE conditions or a single
+	 *  condition as a string
+	 * @return int Number of records found
+	 */
+	public static function count($conditions)
+	{
+		SimpleORM::checkPHPVersion();
+		$obj = new static();
+		return $obj->countRows($conditions);
+	}
+	
+	/**
 	 * Retrieve all existing objects from database
 	 *
 	 * @param mixed $conditions Numeric array of SQL WHERE conditions or a single
@@ -187,9 +201,8 @@ abstract class SimpleORM
 		$table = $this->tableName();
 		$columns = array();
 		$joins = array();
-		$params = array();
 		$obj = new $this->class_name();
-		$cols = $obj->columns();
+		$cols = $obj->columns(true, true);
 		foreach ($cols as $col => $data)
 		{
 			$columns[] = "`$table`.`$col`";
@@ -197,33 +210,16 @@ abstract class SimpleORM
 			{
 				list($table_fk, $col_fk) = explode(':', $data['foreign_key']);
 				$table_fk = $db_x.$table_fk;
-				$columns[] = "`$table_fk`.`$col_fk`";
-				$joins[] = "INNER JOIN `$table_fk` ON `$table`.`$col` = `$table_fk`.`$col_fk`";
+				$table_fk_alias = cot_unique(8);
+				$columns[] = "`$table_fk_alias`.`$col_fk`";
+				$joins[] = "LEFT JOIN `$table_fk` AS `$table_fk_alias` ON `$table`.`$col` = `$table_fk_alias`.`$col_fk`";
 			}
 		}
 		$columns = implode(', ', $columns);
 		$joins = implode(' ', $joins);
 		
-		if (!is_array($conditions)) $conditions = array($conditions);
-		if (count($conditions) > 0)
-		{
-			$where = array();
-			foreach ($conditions as $condition)
-			{
-				$parts = array();
-				preg_match_all('/(.+?)([<>= ]+)(.+)/', $condition, $parts);
-				$column = trim($parts[1][0]);
-				$operator = trim($parts[2][0]);
-				$value = trim(trim($parts[3][0]), '\'"`');
-				if ($column && $operator && $value)
-				{
-					$where[] = "$column $operator :$column";
-					if (intval($value) == $value) $value = intval($value);
-					$params[$column] = $value;
-				}
-			}
-			$where = 'WHERE '.implode(' AND ', $where);
-		}
+		list($where, $params) = $this->parseConditions($conditions);
+		
 		$order = ($order) ? "ORDER BY `$order` $way" : '';
 		$limit = ($limit) ? "LIMIT $offset, $limit" : '';
 		
@@ -238,6 +234,56 @@ abstract class SimpleORM
 			$objects[] = $obj;
 		}
 		return (count($objects) > 0) ? $objects : null;
+	}
+	
+	/**
+	 * Returns SQL COUNT for given conditions
+	 *
+	 * @param mixed $conditions Array of SQL WHERE conditions or a single
+	 *  condition as a string
+	 * @return int
+	 */
+	public function countRows($conditions)
+	{
+		list($where, $params) = $this->parseConditions($conditions);
+		
+		return (int)$this->db->query("
+			SELECT COUNT(*) FROM ".$this->tableName()." $where
+		", $params)->fetchColumn();
+	}
+	
+	/**
+	 * Parses query conditions from string or array
+	 *
+	 * @param mixed $conditions SQL WHERE conditions as string or numeric array of strings
+	 * @param array $params Optional PDO params to pass through
+	 * @return array SQL WHERE part and PDO params
+	 */
+	protected function parseConditions($conditions, $params = array())
+	{
+		$where = '';
+		$table = $this->tableName();
+		if (!is_array($conditions)) $conditions = array($conditions);
+		if (count($conditions) > 0)
+		{
+			$where = array();
+			foreach ($conditions as $condition)
+			{
+				$parts = array();
+				preg_match_all('/(.+?)([<>= ]+)(.+)/', $condition, $parts);
+				$column = trim($parts[1][0]);
+				$operator = trim($parts[2][0]);
+				$value = trim(trim($parts[3][0]), '\'"`');
+				if ($column && $operator)
+				{
+					$where[] = "`$table`.`$column` $operator :$column";
+					if (intval($value) == $value) $value = intval($value);
+					$params[$column] = $value;
+				}
+			}
+			$where = 'WHERE '.implode(' AND ', $where);
+		}
+		return array($where, $params);
 	}
 
 	/**
@@ -270,7 +316,7 @@ abstract class SimpleORM
 	 * @param array $data Query data
 	 * @return bool 
 	 */
-	protected function validateData($data)
+	protected function validateData($data, $for = 'insert')
 	{
 		global $db_x;
 		if (!is_array($data)) return;
@@ -279,17 +325,27 @@ abstract class SimpleORM
 		{
 			if (!isset($this->columns[$column]))
 			{
-				cot_message("Invalid column name: $column", 'error', $column);
+				cot_error("Invalid column name: $column", $column);
 				return FALSE;
 			}
-			if ($this->columns[$column]['locked'] || $this->columns[$column]['auto_increment'])
+			if ($this->columns[$column]['auto_increment'])
 			{
-				cot_message("Can't update locked or auto_increment column: $column", 'error', $column);
+				cot_error("Can't update auto_increment column: $column", $column);
+				return FALSE;
+			}
+			if ($for == 'update' && $this->columns[$column]['primary_key'])
+			{
+				cot_error("Can't update primary_key column: $column", $column);
+				return FALSE;
+			}
+			if ($for == 'update' && $this->columns[$column]['locked'])
+			{
+				cot_error("Can't update locked column: $column", $column);
 				return FALSE;
 			}
 			if (isset($this->columns[$column]['length']) && mb_strlen($value) > $this->columns[$column]['length'])
 			{
-				cot_message("Value for column '$column' exceeds maximum length", 'error', $column);
+				cot_error("Value for column '$column' exceeds maximum length", $column);
 				return FALSE;
 			}
 			$typecheck_pass = TRUE;
@@ -310,17 +366,17 @@ abstract class SimpleORM
 			}
 			if (!$typecheck_pass)
 			{
-				cot_message("Invalid variable type for column '$column': ".gettype($value), 'error', $column);
+				cot_error("Invalid variable type for column '$column': ".gettype($value), $column);
 				return FALSE;
 			}
 			if ($this->columns[$column]['foreign_key'] && $this->columns[$column]['default_value'] !== $value)
 			{
 				$fk = explode(':', $this->columns[$column]['foreign_key']);
-				if (count($fk) == 2 && fieldExists($fk[0], $fk[1]))
+				if (count($fk) == 2 && $this->db->fieldExists($db_x.$fk[0], $fk[1]))
 				{
 					if ($this->db->query("SELECT `{$fk[1]}` FROM `$db_x{$fk[0]}` WHERE `{$fk[1]}` = ?", array($value))->rowCount() == 0)
 					{
-						cot_message("Foreign key check failed, no such record in table $db_x{$fk[0]} for column {$fk[1]} and value $value", 'error', $column);
+						cot_error("Foreign key check failed, no such record in table $db_x{$fk[0]} for column {$fk[1]} and value $value", $column);
 						return FALSE;
 					}
 				}
@@ -344,13 +400,25 @@ abstract class SimpleORM
 			if ($for == 'insert' && isset($rules['on_insert']) && !isset($data[$column]))
 			{
 				if (is_string($rules['on_insert']))
-					$rules['on_insert'] = str_replace('NOW()', $sys['now'], $rules['on_insert']);
+				{
+					if (strpos($rules['on_insert'], 'NOW()') !== FALSE)
+					{
+						$rules['on_insert'] = str_replace('NOW()', $sys['now'], $rules['on_insert']);
+						if (is_numeric($rules['on_insert'])) $rules['on_insert'] = (int)$rules['on_insert'];
+					}
+				}
 				$data[$column] = $rules['on_insert'];
 			}
 			if ($for == 'update' && isset($rules['on_update']) && !isset($data[$column]))
 			{
 				if (is_string($rules['on_update']))
-					$rules['on_update'] = str_replace('NOW()', $sys['now'], $rules['on_update']);
+				{
+					if (strpos($rules['on_update'], 'NOW()') !== FALSE)
+					{
+						$rules['on_update'] = str_replace('NOW()', $sys['now'], $rules['on_update']);
+						if (is_numeric($rules['on_update'])) $rules['on_update'] = (int)$rules['on_update'];
+					}
+				}
 				$data[$column] = $rules['on_update'];
 			}
 			if ($rules['type'] == 'object')
@@ -378,27 +446,30 @@ abstract class SimpleORM
 			cot_block($usr['isadmin']);
 			if (!$action || $action == 'update')
 			{
-				$res = $this->db->update(
-					$table,
-					$this->prepData($this->data, 'update'), 
-					"$pk = ?", 
-					array($this->data[$pk])
-				);
-				if ($res !== FALSE)
+				$data = $this->prepData($this->data, 'update');
+				if ($this->validateData($data))
 				{
-					return 'update';
+					$res = $this->db->update($table, $data, "$pk = ?", 
+						array($this->data[$pk])
+					);
+					if ($res !== FALSE)
+					{
+						return 'update';
+					}
 				}
 			}
 		}
 		elseif (!$action || $action == 'insert')
 		{
-			$res = $this->db->insert(
-				$table, $this->prepData($this->data, 'insert')
-			);
-			if ($res)
+			$data = $this->prepData($this->data, 'insert');
+			if ($this->validateData($data))
 			{
-				$this->data[$pk] = $this->db->lastInsertId();
-				return 'insert';
+				$res = $this->db->insert($table, $data);
+				if ($res)
+				{
+					$this->data[$pk] = $this->db->lastInsertId();
+					return 'insert';
+				}
 			}
 		}
 		return false;
@@ -531,8 +602,8 @@ abstract class SimpleORM
 			$params['index'] && $indexes[] = "KEY `i_$name` (`$name`)";
 			$params['unique'] && $indexes[] = "UNIQUE KEY `u_$name` (`$name`)";
 
-			if ($type == 'object') $type = 'text';
 			$type = strtoupper($params['type']);
+			if ($type == 'OBJECT') $type = 'TEXT';
 			if ($params['length'])
 				$type .= "({$params['length']})";
 			$columns[] = "`$name` $type $props";
