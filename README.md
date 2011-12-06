@@ -34,8 +34,8 @@ in classes/Project.php:
                 'length' => 50,
                 'unique' => true
             ),
-            'desc' => array(
-                'type' => 'text'
+            'metadata' => array(
+                'type' => 'object'
             ),
             'type' => array(
                 'type' => 'varchar',
@@ -74,6 +74,7 @@ foreign key constraints and unique values. It also allows you to 'lock' and/or
 #### Column properties
 
 *   type (string): MySQL data type (lowercase), such as 'int', 'varchar', 'text'
+    or 'object', which will automatically be serialized/unserialized.
 *   length (int/string): Maximum display length of the value, or in case of 
     float or decimal, a string representing precision and scale.
 *   primary_key (bool): If true, the column will be considered the primary key 
@@ -86,6 +87,8 @@ foreign key constraints and unique values. It also allows you to 'lock' and/or
 *   unique (bool): If true, sets an MySQL UNIQUE constraint on this column.
 *   auto_increment (bool): If true, sets the MySQL AUTO_INCREMENT flag on this 
     column.
+*   default_value: MySQL DEFAULT value. If foreign_key is given, this is the
+    only value which will pass even if such a foreign record doesn't exist.
 *   on_insert (string): Default value for the column in INSERT queries. Accepts 
     a special value 'NOW()' which will translate to PHP `time()`.
 *   on_update (string): Default value in UPDATE queries. Also accepts 'NOW()'.
@@ -103,7 +106,9 @@ foreign key constraints and unique values. It also allows you to 'lock' and/or
     {
         $obj = new Project(array(
             'name' => $name,
-            'desc' => $desc,
+            'metadata' => array(
+                'description' => $desc
+            ),
             'type' => $type,
             'ownerid' => $usr['id']
         ));

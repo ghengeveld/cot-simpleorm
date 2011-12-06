@@ -9,7 +9,7 @@ defined('COT_CODE') or die('Wrong URL.');
  * and must specify $class_name, $table_name and $columns
  * 
  * @package Cotonti
- * @version 1.0
+ * @version 1.1
  * @author Gert Hengeveld
  * @copyright (c) Cotonti Team 2011
  * @license BSD
@@ -65,7 +65,10 @@ abstract class SimpleORM
 	 *
 	 * @param string $key Optional key to fetch a single value
 	 * @param mixed $value Optional value to set
-	 * @return mixed Array of key->value pairs or a string value if $key was provided 
+	 * @return mixed 
+	 *	array of key->value pairs, or
+	 *  string value if $key was provided, or
+	 *  boolean if $value was provided
 	 */
 	public function data($key = null, $value = null)
 	{
@@ -84,7 +87,8 @@ abstract class SimpleORM
 			{
 				if (array_key_exists($key, $this->columns) && !$this->columns[$key]['hidden'])
 				{
-					return $this->data[$key];
+					return ($this->columns[$key]['type'] == 'object') ?
+						unserialize($this->data[$key]) : $this->data[$key];
 				}
 			}
 			else
@@ -93,7 +97,8 @@ abstract class SimpleORM
 				foreach ($this->columns as $key => $val)
 				{
 					if ($this->columns[$key]['hidden']) continue;
-					$data[$key] = $this->data[$key];
+					$data[$key] = ($this->columns[$key]['type'] == 'object') ?
+						unserialize($this->data[$key]) : $this->data[$key];
 				}
 				return $data;
 			}
@@ -122,7 +127,7 @@ abstract class SimpleORM
 	/**
 	 * Retrieve all existing objects from database
 	 *
-	 * @param mixed $conditions Array of SQL WHERE conditions or a single
+	 * @param mixed $conditions Numeric array of SQL WHERE conditions or a single
 	 *  condition as a string
 	 * @param int $limit Maximum number of returned objects
 	 * @param int $offset Offset from where to begin returning objects
@@ -300,7 +305,7 @@ abstract class SimpleORM
 					break;
 				case 'decimal':
 				case 'float':
-					if (!is_double($value) && !is_float($value)) $typecheck_pass = FALSE;
+					if (!is_int($value) && !is_double($value) && !is_float($value)) $typecheck_pass = FALSE;
 					break;
 			}
 			if (!$typecheck_pass)
@@ -308,7 +313,7 @@ abstract class SimpleORM
 				cot_message("Invalid variable type for column '$column': ".gettype($value), 'error', $column);
 				return FALSE;
 			}
-			if ($this->columns[$column]['foreign_key'])
+			if ($this->columns[$column]['foreign_key'] && $this->columns[$column]['default_value'] !== $value)
 			{
 				$fk = explode(':', $this->columns[$column]['foreign_key']);
 				if (count($fk) == 2 && fieldExists($fk[0], $fk[1]))
@@ -347,6 +352,10 @@ abstract class SimpleORM
 				if (is_string($rules['on_update']))
 					$rules['on_update'] = str_replace('NOW()', $sys['now'], $rules['on_update']);
 				$data[$column] = $rules['on_update'];
+			}
+			if ($rules['type'] == 'object')
+			{
+				$data[$column] = serialize($data[$column]);
 			}
 		}
 		return $data;
@@ -522,6 +531,7 @@ abstract class SimpleORM
 			$params['index'] && $indexes[] = "KEY `i_$name` (`$name`)";
 			$params['unique'] && $indexes[] = "UNIQUE KEY `u_$name` (`$name`)";
 
+			if ($type == 'object') $type = 'text';
 			$type = strtoupper($params['type']);
 			if ($params['length'])
 				$type .= "({$params['length']})";
