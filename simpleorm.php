@@ -409,7 +409,7 @@ abstract class SimpleORM
 	 *
 	 * @return bool TRUE on successful insert, FALSE otherwise
 	 */
-	protected function insert()
+	public function insert()
 	{
 		return ($this->save('insert') == 'insert');
 	}
@@ -419,7 +419,7 @@ abstract class SimpleORM
 	 *
 	 * @return bool TRUE on successful update, FALSE otherwise
 	 */
-	protected function update()
+	public function update()
 	{
 		return ($this->save('update') == 'update');
 	}
